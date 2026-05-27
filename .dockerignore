@@ -1,0 +1,10 @@
+**/target/classes/
+**/target/test-classes/
+**/target/surefire*
+**/target/maven-status/
+**/target/*.original
+.git/
+.idea/
+*.iml
+docx/
+**.md

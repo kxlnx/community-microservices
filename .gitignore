@@ -1,0 +1,10 @@
+target/
+.idea/
+*.iml
+*.log
+.env
+.env.local
+node_modules/
+docx/
+.env.example
+application-local.yml.example

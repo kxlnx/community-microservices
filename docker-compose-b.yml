@@ -1,0 +1,147 @@
+# ============================================
+# Machine B (Ubuntu, 172.29.238.2) - Async services + Kafka
+# ============================================
+
+services:
+  mysql-interact:
+    image: mysql:8.0
+    container_name: mysql-interact
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: community_interact
+    ports:
+      - "3309:3306"
+    volumes:
+      - ./docker/init/03-interact.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-interact-data:/var/lib/mysql
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p123456"]
+      interval: 10s
+      retries: 5
+
+  mysql-message:
+    image: mysql:8.0
+    container_name: mysql-message
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: community_message
+    ports:
+      - "3310:3306"
+    volumes:
+      - ./docker/init/04-message.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-message-data:/var/lib/mysql
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p123456"]
+      interval: 10s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://172.29.238.2:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      retries: 10
+      start_period: 30s
+
+  community-interact:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: community-interact
+    container_name: community-interact
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-interact:3306/community_interact?characterEncoding=utf-8&useSSL=false&serverTimezone=Hongkong&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 123456
+      SPRING_DATA_REDIS_HOST: 172.29.238.90
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_DATABASE: 11
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      FEIGN_CLIENT_POST_URL: http://172.29.238.90:8087
+    depends_on:
+      mysql-interact:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - community-net
+
+  community-message:
+    build:
+      context: ./community-message
+      dockerfile: Dockerfile
+    container_name: community-message
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-message:3306/community_message?characterEncoding=utf-8&useSSL=false&serverTimezone=Hongkong&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 123456
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      FEIGN_CLIENT_USER_URL: http://172.29.238.90:8086
+    depends_on:
+      mysql-message:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - community-net
+
+  community-search:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: community-search
+    container_name: community-search
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_ELASTICSEARCH_URIS: http://172.29.238.90:9200
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - community-net
+
+networks:
+  community-net:
+    driver: bridge
+
+volumes:
+  mysql-interact-data:
+  mysql-message-data:

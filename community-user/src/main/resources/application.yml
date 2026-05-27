@@ -1,0 +1,49 @@
+server:
+  port: 8086
+  forward-headers-strategy: framework
+  servlet:
+    context-path:
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  level:
+    com.nowcoder: debug
+
+community:
+  path:
+    domain: http://localhost:8086
+
+feign:
+  client:
+    interact:
+      url: ${INTERACT_SERVICE_URL:http://localhost:8083}
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/community_user?characterEncoding=utf-8&useSSL=false&serverTimezone=Hongkong&allowPublicKeyRetrieval=true
+    username: root
+    password: ${DB_PASSWORD}
+  data:
+    redis:
+      database: 11
+      host: localhost
+      port: 6379
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: community-consumer-group
+      enable-auto-commit: true
+      auto-commit-interval: 3000
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.nowcoder.community.entity
+  configuration:
+    use-generated-keys: true
+    map-underscore-to-camel-case: true
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: 43200000

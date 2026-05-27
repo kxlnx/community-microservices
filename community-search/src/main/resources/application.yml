@@ -1,0 +1,11 @@
+server:
+  port: 8085
+
+feign:
+  client:
+    post:
+      url: ${POST_SERVICE_URL:http://localhost:8087}
+
+spring:
+  elasticsearch:
+    uris: ${ES_URIS:http://localhost:9200}

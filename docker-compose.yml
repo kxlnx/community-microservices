@@ -1,0 +1,298 @@
+version: '3.8'
+
+services:
+  # ========== 数据库 ==========
+  mysql-user:
+    image: mysql:8.0
+    container_name: mysql-user
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: community_user
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./docker/init/01-user.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-user-data:/var/lib/mysql
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      retries: 5
+
+  mysql-post:
+    image: mysql:8.0
+    container_name: mysql-post
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: community_post
+    ports:
+      - "3308:3306"
+    volumes:
+      - ./docker/init/02-post.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-post-data:/var/lib/mysql
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      retries: 5
+
+  mysql-interact:
+    image: mysql:8.0
+    container_name: mysql-interact
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: community_interact
+    ports:
+      - "3309:3306"
+    volumes:
+      - ./docker/init/03-interact.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-interact-data:/var/lib/mysql
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      retries: 5
+
+  mysql-message:
+    image: mysql:8.0
+    container_name: mysql-message
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: community_message
+    ports:
+      - "3310:3306"
+    volumes:
+      - ./docker/init/04-message.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-message-data:/var/lib/mysql
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      retries: 5
+
+  # ========== 中间件 ==========
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+
+  elasticsearch:
+    image: elasticsearch:7.17.27
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD", "curl", "-s", "http://localhost:9200/_cluster/health"]
+      interval: 15s
+      retries: 10
+      start_period: 40s
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    networks:
+      - community-net
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      retries: 10
+      start_period: 30s
+
+  # ========== 微服务 ==========
+  community-user:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: community-user
+    container_name: community-user
+    ports:
+      - "8086:8086"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-user:3306/community_user?characterEncoding=utf-8&useSSL=false&serverTimezone=Hongkong&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      mysql-user:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - community-net
+
+  community-post:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: community-post
+    container_name: community-post
+    ports:
+      - "8087:8087"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-post:3306/community_post?characterEncoding=utf-8&useSSL=false&serverTimezone=Hongkong&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+      FEIGN_CLIENT_USER_URL: http://community-user:8086
+      FEIGN_CLIENT_INTERACT_URL: http://community-interact:8083
+    depends_on:
+      mysql-post:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - community-net
+
+  community-interact:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: community-interact
+    container_name: community-interact
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-interact:3306/community_interact?characterEncoding=utf-8&useSSL=false&serverTimezone=Hongkong&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      FEIGN_CLIENT_POST_URL: http://community-post:8087
+    depends_on:
+      mysql-interact:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - community-net
+
+  community-message:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: community-message
+    container_name: community-message
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-message:3306/community_message?characterEncoding=utf-8&useSSL=false&serverTimezone=Hongkong&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      FEIGN_CLIENT_USER_URL: http://community-user:8086
+    depends_on:
+      mysql-message:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - community-net
+
+  community-search:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: community-search
+    container_name: community-search
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - community-net
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: community-gateway
+    container_name: gateway
+    ports:
+      - "8000:8000"
+    environment:
+      SPRING_CLOUD_GATEWAY_ROUTES_0_URI: http://community-user:8086
+      SPRING_CLOUD_GATEWAY_ROUTES_1_URI: http://community-post:8087
+      SPRING_CLOUD_GATEWAY_ROUTES_2_URI: http://community-interact:8083
+      SPRING_CLOUD_GATEWAY_ROUTES_3_URI: http://community-message:8084
+      SPRING_CLOUD_GATEWAY_ROUTES_4_URI: http://community-search:8085
+    depends_on:
+      - community-user
+      - community-post
+      - community-interact
+      - community-message
+      - community-search
+    networks:
+      - community-net
+
+networks:
+  community-net:
+    driver: bridge
+
+volumes:
+  mysql-user-data:
+  mysql-post-data:
+  mysql-interact-data:
+  mysql-message-data:
